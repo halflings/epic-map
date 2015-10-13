@@ -1,9 +1,13 @@
 import itertools
 
 import numpy as np
+from scipy.spatial import Voronoi
 import pyglet
 from pyglet.gl import *
 
+RELAXATION_ITERATIONS = 2
+MAX_FPS = 80
+DEFAULT_NUM_POINTS = 250
 
 class GameWindow(pyglet.window.Window):
     def __init__(self, **kwargs):
@@ -24,6 +28,9 @@ class GameWindow(pyglet.window.Window):
         # FPS display, for debugging purposes
         self.fps_display = pyglet.clock.ClockDisplay()
 
+        # Generate the map
+        self.number_points = DEFAULT_NUM_POINTS
+        self.generate_map()
 
     def setup_opengl(self):
         glEnable(GL_BLEND)
@@ -32,13 +39,25 @@ class GameWindow(pyglet.window.Window):
         glHint(GL_LINE_SMOOTH_HINT, GL_NICEST)
         glClearColor(0.2, 0.2, 0.2, 1)
 
-    def center_coords(self, *points):
-        offset = np.array([self.width / 2, self.height / 2])
-        for point in points:
-            yield offset + point
+    def generate_map(self):
+        # Seed points used to generate the map
+        self.points = (np.random.rand(self.number_points, 2) * np.array([self.width, self.height])).astype(int)
+        self.voronoi = Voronoi(self.points)
+
+        # Relaxing the generate points
+        for i in range(RELAXATION_ITERATIONS):
+            self.relax_points()
+
+    def relax_points(self):
+        for i in range(self.number_points):
+            region = self.voronoi.regions[self.voronoi.point_region[i]]
+            if any(v == -1 for v in region):
+                continue
+            centroid = np.mean([self.voronoi.vertices[v] for v in region], axis=0)
+            self.points[i] = centroid.astype(int)
+        self.voronoi = Voronoi(self.points)
 
     def draw_line(self, a, b, color):
-        a, b = self.center_coords(a, b)
         coords = tuple(itertools.chain(a.astype(int), b.astype(int)))
         color_tuple = tuple(itertools.chain(color, color))
         glLineWidth(1)
@@ -47,19 +66,31 @@ class GameWindow(pyglet.window.Window):
             ('c3B', color_tuple)
         )
 
-
-    def draw_quad(self, a, b, c, d, color):
-        a, b, c, d = self.center_coords(a, b, c, d)
-        coords = np.array(tuple(itertools.chain(a, b, c, d))).astype(int)
-        color_tuple = tuple(itertools.chain(color, color, color, color))
-        pyglet.graphics.draw(4, pyglet.gl.GL_QUADS,
+    def draw_quads(self, points, color=(255, 255, 255)):
+        coords = tuple(points.astype(int).flat)
+        color_tuple = tuple(np.array([color for i in range(len(points))]).flat)
+        pyglet.graphics.draw(len(points), pyglet.gl.GL_QUADS,
             ('v2i', coords),
             ('c3B', color_tuple)
         )
 
 
     def draw_map(self):
-        pass
+        # Voronoi background
+        for i, region in enumerate(self.voronoi.regions):
+            if any(v == -1 for v in region):
+                continue
+            coords = np.array([self.voronoi.vertices[v] for v in region])
+            random_color = (255 * np.array([np.sin(i), np.cos(i), np.tan(i)])).astype(int)
+            self.draw_quads(coords, random_color)
+
+        # Voronoi centers
+        coords = tuple(self.points.flat)
+        pyglet.graphics.draw(len(self.points), pyglet.gl.GL_POINTS,
+            ('v2i', coords)
+        )
+
+
 
     def on_draw(self):
         self.clear()
@@ -71,11 +102,13 @@ class GameWindow(pyglet.window.Window):
     def update(self, dt):
         pass
 
+
+    def on_mouse_press(self, x, y, button, modifiers):
+        self.generate_map()
+
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
         pass
 
-    def on_mouse_press(self, x, y, button, modifiers):
-        pass
 
 if __name__ == '__main__':
     window = GameWindow(width=800, height=600)
